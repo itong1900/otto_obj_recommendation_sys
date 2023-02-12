@@ -150,7 +150,7 @@ def run_inference_parallel(rows, aids, ops, ts, result, full_sim_matrix, test_op
         inference_single_session(session, starting_idx, length, start_time, aids, ops, ts, result, full_sim_matrix, test_ops_weights)
 
 
-def storeItemTotalLike(aids, ops):
+def store_item_total_like(aids, ops):
     """
     local method to return itemTotalLikes map.
     """
@@ -190,7 +190,7 @@ def main(output_path):
     df, df_test, aids, ts, ops = load_data()
     
     ## Fit co-visitation matrices
-    item_total_likes = storeItemTotalLike(aids, ops)
+    item_total_likes = store_item_total_like(aids, ops)
 
     simMatrices = {}   ## store a few different similarity matrices using different scoring system, for different prediction type
 
