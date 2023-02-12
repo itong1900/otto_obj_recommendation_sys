@@ -3,7 +3,12 @@ A 109th ranking solution + follow up improvements/explorations.
 
 ## 2-Stage-System
 
-![image](https://user-images.githubusercontent.com/71299664/218249327-b85c7f84-cebc-4156-a79a-3038e630cc7e.png)
+![image](https://user-images.githubusercontent.com/71299664/218287232-a8a68476-f1b5-4222-ad0e-e2add7c3ef1a.png)
+
+### Stage 0 - Data Preprocessing
+Pipelines for Transforming the primitive data provided by Kaggle host(in .json) to column-based format using PySpark.
+This enables more efficient memory-usage when computing a co-visitation matrix and making inferences in the later part.
+See data_engineering directory for more details. 
 
 
 ### Stage I - Item Colloborative Filtering
