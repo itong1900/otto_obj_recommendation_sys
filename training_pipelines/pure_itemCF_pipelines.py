@@ -86,52 +86,59 @@ def inference_single_session(session, starting_idx, length, start_time, aids, op
     Store top k candidates based on handcrafted rules.
     Final result will store as into result struct as result[session] = list_of_topK. 
     """
+    # PREV_INTERACT_BONUS = 20
+    NEARBY_ACTION_BONUS = 1.5
     
     ending_idx = starting_idx + length
+    end_time = ts[ending_idx-1]
     
     candidates = aids[starting_idx: ending_idx][::-1]
     candidates_ops = ops[starting_idx: ending_idx][::-1]
     
     ## record all potential aid that might be relevant
-    potential_to_recommend = nb.typed.Dict.empty(key_type=nb.types.int64, value_type=nb.types.float64)    
-
+    potential_to_recommend = nb.typed.Dict.empty(key_type=nb.types.int64, value_type=nb.types.float64)
+    
     ## get unique aid of each session 
     unique_aids = nb.typed.Dict.empty(key_type = nb.types.int64, value_type = nb.types.float64)
     for a in candidates:
         unique_aids[a] = 0
     
-    if len(unique_aids) >= 20:   ## if the user has many actions, recommend based on the itemes it had been interacted with only.
-        PREV_INTERACT_BONUS = 10
-        sequence_weight = np.power(2, np.linspace(0.3, 1, len(candidates)))[::-1] - 1
-        for aid, op, w in zip(candidates, candidates_ops, sequence_weight):
+    ## Sequence weight to all the candidates, from near to far 
+    sequence_weight = np.power(2, np.linspace(0.3, 1, len(candidates)))[::-1] - 1
+    
+    ## Time weight of all candidates, from near to far
+    time_weights = []
+    time_lapse = end_time - start_time + 1
+    for idx in range(starting_idx, ending_idx):
+        if end_time - ts[idx] < 2 * 60 * 60:   ## apply nearby action bonus
+            time_weight = (1 + 0.5 ** ((end_time - ts[idx])/time_lapse)) * NEARBY_ACTION_BONUS
+        else:
+            time_weight = 1 + 0.5 ** ((end_time - ts[idx])/time_lapse)
+        time_weights.append(time_weight)
+    time_weights = time_weights[::-1]
+    
+    ## making inference
+    if len(unique_aids) >= 20:  
+        for aid, op, seq_w, time_w in zip(candidates, candidates_ops, sequence_weight, time_weights):
             if aid not in potential_to_recommend:
                 potential_to_recommend[aid] = 0
-            potential_to_recommend[aid] += w * test_ops_weights[op] * PREV_INTERACT_BONUS 
-        #result[session] = np.array(heap_topk_return_list(potential_to_recommend, 20)) 
-    else:  
-        for idx in range(starting_idx, ending_idx):
-            candidate = aids[idx]
-            if candidate not in potential_to_recommend:
-                potential_to_recommend[candidate] = np.inf ## ensure large weights on items had interacted with. 
-    
-    ## In case some items are duplicates, when potential_to_recommend not yet reach 20, impute with items from sim matrix
-    if len(potential_to_recommend) < 80: ## CAUTIOUS: validation purpose only 
-        sequence_weight = np.power(2, np.linspace(0.1, 1, len(candidates))) - 1   ## CHANGE_MADE: 0.3 -> 0.1
-        for idx in range(starting_idx, ending_idx):
-            candidate = aids[idx] 
-            time_weight = 1 + 0.1 ** ((1662328791-ts[idx])/(1662328791-1659304800))    ## TODO: consider 
-            candidate_realtime_weight = test_ops_weights[ops[idx]] * sequence_weight[idx-starting_idx] * time_weight  
-            ## load the potential items to recommend,
-            if candidate not in full_sim_matrix: 
+            potential_to_recommend[aid] += seq_w * time_w * test_ops_weights[op] #* PREV_INTERACT_BONUS
+    else:   ## otherwise, fill the rest with similar items.
+        for aid, op, seq_w, time_w in zip(candidates, candidates_ops, sequence_weight, time_weights):
+            if aid not in potential_to_recommend:
+                potential_to_recommend[aid] = 0
+            potential_to_recommend[aid] += np.inf #seq_w * time_w * test_ops_weights[op] * PREV_INTERACT_BONUS # np.inf #
+            ## adding the similar items, if full_sim_matrix don't have such record, skip. 
+            if aid not in full_sim_matrix:
                 continue
-            for similar_item in full_sim_matrix[candidate]:
-#                 if similar_item in candidates:    ## skip the item if the it's already been interacted
-#                     continue
+            for similar_item in full_sim_matrix[aid]:
+                ## if sim_item is in candidates, would be included above anyways, skip 
+                if similar_item in candidates:
+                    continue
                 if similar_item not in potential_to_recommend:
                     potential_to_recommend[similar_item] = 0
-                potential_to_recommend[similar_item] += full_sim_matrix[candidate][similar_item] * candidate_realtime_weight 
-    
-    result[session] = np.array(itemCF_functions.heap_topk_return_list(potential_to_recommend, RECALL_SIZE))   
+                potential_to_recommend[similar_item] += seq_w * time_w * test_ops_weights[op] * full_sim_matrix[aid][similar_item]  ## no PREV_INTERACT_BONUS as expected, replaced with sim_matrix scores
+    result[session] = np.array(itemCF_functions.heap_topk_return_list(potential_to_recommend, RECALL_SIZE))
     
 @nb.jit(nopython=True)
 def run_inference_parallel(rows, aids, ops, ts, result, full_sim_matrix, test_ops_weights):
